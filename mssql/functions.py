@@ -24,13 +24,23 @@ if VERSION >= (5, 2):
 if VERSION >= (3, 1):
     from django.db.models.fields.json import (
         KeyTransform, KeyTransformIn, KeyTransformExact,
-        HasKeyLookup, compile_json_path)
+        HasKeyLookup)
 
 if VERSION >= (3, 2):
     from django.db.models.functions.math import Random
 
 DJANGO3 = VERSION[0] >= 3
 DJANGO41 = VERSION >= (4, 1)
+
+
+def compile_json_path(key_transforms, include_root=True, connection=None):
+    if (3, 1) <= VERSION < (6, 0):
+        from django.db.models.fields.json import compile_json_path
+        return compile_json_path(key_transforms, include_root=include_root)
+    elif connection:
+        return connection.ops.compile_json_path(key_transforms, include_root=include_root)
+    else:
+        raise ValueError('Connection required to compile json path')
 
 
 class TryCast(Cast):
@@ -45,7 +55,7 @@ def sqlserver_cast(self, compiler, connection, **extra_context):
                 **extra_context
             )
     return self.as_sql(compiler, connection, **extra_context)
-    
+
 
 def sqlserver_atan2(self, compiler, connection, **extra_context):
     return self.as_sql(compiler, connection, function='ATN2', **extra_context)
@@ -83,7 +93,7 @@ def sqlserver_degrees(self, compiler, connection, **extra_context):
 def sqlserver_radians(self, compiler, connection, **extra_context):
     return self.as_sql(
             compiler, connection, function='RADIANS',
-            template= 'RADIANS(CONVERT(float, %(expressions)s))', 
+            template= 'RADIANS(CONVERT(float, %(expressions)s))',
             **extra_context
         )
 
@@ -104,13 +114,13 @@ def sqlserver_mod(self, compiler, connection):
     # Compile the left-hand side (lhs) expression to SQL and parameters.
     lhs_sql, lhs_params = compiler.compile(expr[0])
     # Compile the right-hand side (rhs) expression to SQL and parameters.
-    rhs_sql, rhs_params = compiler.compile(expr[1])   
+    rhs_sql, rhs_params = compiler.compile(expr[1])
     # Build the SQL template for modulo using ABS, FLOOR, and SIGN functions.
-    template = '(ABS(%s) - FLOOR(ABS(%s) / ABS(%s)) * ABS(%s)) * SIGN(%s) * SIGN(%s)'  
+    template = '(ABS(%s) - FLOOR(ABS(%s) / ABS(%s)) * ABS(%s)) * SIGN(%s) * SIGN(%s)'
     # Substitute the compiled SQL expressions into the template.
-    sql = template % (lhs_sql, lhs_sql, rhs_sql, rhs_sql, lhs_sql, rhs_sql)   
+    sql = template % (lhs_sql, lhs_sql, rhs_sql, rhs_sql, lhs_sql, rhs_sql)
     # Combine all parameters in the correct order for the SQL statement.
-    params = lhs_params + lhs_params + rhs_params + rhs_params + lhs_params + rhs_params    
+    params = lhs_params + lhs_params + rhs_params + rhs_params + lhs_params + rhs_params
     try:
         # return sql,params
         return sql, params
@@ -244,7 +254,7 @@ def sqlserver_json_array(self, compiler, connection, **extra_context):
             val = arg.value
             # If the value is None, we represent it as SQL NULL
             if val is None:
-                elements.append('NULL')     
+                elements.append('NULL')
             elif isinstance(val, (int, float)):
                 # Numbers are inserted as it is, without quotes
                 elements.append('%s')
@@ -327,7 +337,7 @@ def json_HasKeyLookup(self, compiler, connection):
     if isinstance(self.lhs, KeyTransform):
         # If lhs is a KeyTransform, preprocess to get SQL and JSON path
         lhs, _, lhs_key_transforms = self.lhs.preprocess_lhs(compiler, connection)
-        lhs_json_path = compile_json_path(lhs_key_transforms)
+        lhs_json_path = compile_json_path(lhs_key_transforms, connection=connection)
         lhs_params = []
     else:
         # Otherwise, process lhs normally and set default JSON path
@@ -355,7 +365,7 @@ def json_HasKeyLookup(self, compiler, connection):
         if VERSION >= (4, 1):
             # For Django 4.1+, split out the final key and build the JSON path accordingly
             *rhs_key_transforms, final_key = rhs_key_transforms
-            rhs_json_path = compile_json_path(rhs_key_transforms, include_root=False)
+            rhs_json_path = compile_json_path(rhs_key_transforms, include_root=False, connection=connection)
             rhs_json_path += self.compile_json_path_final_key(final_key)
             rhs_params.append(lhs_json_path + rhs_json_path)
         else:
@@ -363,7 +373,7 @@ def json_HasKeyLookup(self, compiler, connection):
             rhs_params.append(
                 '%s%s' % (
                     lhs_json_path,
-                    compile_json_path(rhs_key_transforms, include_root=False)
+                    compile_json_path(rhs_key_transforms, include_root=False, connection=connection)
                 )
             )
 
@@ -412,7 +422,7 @@ def json_HasKeyLookup(self, compiler, connection):
             return _combine_conditions(conditions), lhs_params
 
 
-        
+
 def BinaryField_init(self, *args, **kwargs):
     # Add max_length option for BinaryField, default to max
     kwargs.setdefault('editable', False)
@@ -436,8 +446,8 @@ def _get_check_sql(self, model, schema_editor):
     if VERSION >= (5, 1):
         where = query.build_where(self.condition)
     else:
-        # use check for backwards compatibility    
-        where = query.build_where(self.check)    
+        # use check for backwards compatibility
+        where = query.build_where(self.check)
     compiler = query.get_compiler(connection=schema_editor.connection)
     sql, params = where.as_sql(compiler, schema_editor.connection)
     if schema_editor.connection.vendor == 'microsoft':
