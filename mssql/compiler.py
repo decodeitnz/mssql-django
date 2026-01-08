@@ -13,7 +13,7 @@ from django.db.models.functions import (
 from django.db.models.sql import compiler
 from django.db.transaction import TransactionManagementError
 from django.db.utils import NotSupportedError
-from functions import compile_json_path
+from .functions import compile_json_path
 if django.VERSION >= (3, 1):
     from django.db.models.fields.json import KeyTransform as json_KeyTransform
 if django.VERSION >= (4, 2):
